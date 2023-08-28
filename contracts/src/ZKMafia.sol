@@ -1,30 +1,385 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import "@semaphore/interfaces/ISemaphore.sol";
+// import "@semaphore/interfaces/ISemaphore.sol";
+// import "@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol";
+import "./ZKMafiaGame.sol";
+import "./ZKMafiaInstance.sol";
 
-contract ZKMafia {
-    ISemaphore public semaphore;
-
-    uint256 public groupId;
-
-    constructor(address semaphoreAddress, uint256 _groupId) {
+contract ZKMafia is ZKMafiaGame {
+    using ZKMafiaInstance for Game;
+    
+    constructor(address semaphoreAddress) {
         semaphore = ISemaphore(semaphoreAddress);
-        groupId = _groupId;
-
-        semaphore.createGroup(groupId, 20, address(this));
     }
 
-    function joinGroup(uint256 identityCommitment) external {
-        semaphore.addMember(groupId, identityCommitment);
+    function createGame(uint256 identityCommitment, uint256 pubKey) external returns (uint256) {
+        // validate proof they know the secret_key for pub_key 
+        // pub_key is added to game array
+        bytes32[] memory _publicInputs = new bytes32[](1); 
+        _publicInputs[0] = bytes32(pubKey);
+
+        // we'll have a handful of verify contracts, so going to have to keep track of them all somehow
+        // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
+
+        // create new game
+        uint256 groupId = _createGame();
+
+        // call joinGame for the player
+        _joinGame(groupId, identityCommitment, pubKey);
+
+        return groupId;
     }
 
-    function sendSignal(
-        uint256 signal,
-        uint256 merkleTreeRoot,
+    function joinGame(uint256 groupId, uint256 identityCommitment, uint256 pubKey, bytes calldata proof) external {
+        Game storage game = games[groupId];
+        require(game.round == Round.Lobby);
+        (bool exists, uint256 index) = game.getIndexForPubKey(pubKey);
+        // TODO: max limit on number of players?
+        require(game.players.length < 13);
+        require(!exists);
+
+        // validate proof they know the secret_key for pub_key 
+        // pub_key is added to game array
+        bytes32[] memory _publicInputs = new bytes32[](1); 
+        _publicInputs[0] = bytes32(pubKey);
+
+        // we'll have a handful of verify contracts, so going to have to keep track of them all somehow
+        // require(Verifier.verify(proof, _publicInputs), "Invalid proof of public key");
+
+        _joinGame(groupId, identityCommitment, pubKey);
+    }
+
+
+    function startGame(uint256 groupId, uint256 aggregateKey, bytes calldata proof) external {
+        Game storage game = games[groupId];
+        require(game.round == Round.Lobby);
+        //TODO: min limit on number of players?
+        require(game.players.length >= 3);
+
+        // we'll have a handful of verify contracts, so going to have to keep track of them all somehow
+        // this proof should both prove the pubKey is theirs (and also prove the aggregate key is correct??)
+        bytes32[] memory _publicInputs = new bytes32[](1);  
+        _publicInputs[0] = bytes32(game.players[0]); // this is to prove that the known pubKey is the admin key
+
+        // TODO:
+        // if we want to prove correct aggregate key, we'll need to limit the number of public inputs to a set game size
+        // instead we can just pretend there is the ability to "challenge" the aggregate key or something...
+        // or figure out a good way for the contract to compute it
+
+        // require(Verifier.verify(proof, _publicInputs), "Invalid proof of public key");
+
+        // update the game state
+        _startGame(groupId);
+    }
+
+    function publishShuffle(uint256 groupId, uint256 pubKey, bytes calldata proof, bytes32[12] calldata newEncryptedRoles) external {
+        Game storage game = games[groupId];
+        require(game.round == Round.Shuffle);
+
+        // if every player has done the shuffle, we update the state of the game to now allow decryption tokens
+        // here we don't care about anonyminity, so we can don't need to mess with semaphore and nullifier hashes
+        (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
+        require(found);
+        require(game.status[index] == Status.PENDING_ACTION);
+
+        // receives proof of correct mask/remask and Semaphore signal and validates it
+        // this proof should also validate the ownership of a certain pubKey
+        // to prevent a single person from uploading all the shuffles themselves
+        bytes32[] memory _publicInputs = new bytes32[](26);  
+        _publicInputs[0] = bytes32(pubKey); // this is their pubKey
+        _publicInputs[1] = bytes32(game.aggregateKey);
+        // we fix the top size of the game to 12, and if there are less than 12 players, we will pad the inputs
+        uint256 padValue = 2 ** 128;
+        for (uint256 i = 2; i < 14; i++) {
+            if (i > game.players.length) {
+                _publicInputs[i] = bytes32(padValue);
+            } else {
+                _publicInputs[i] = bytes32(game.roles[i-2]);
+            }
+        }
+        for (uint256 i = 14; i < 26; i++) {
+            _publicInputs[i] = newEncryptedRoles[i-14];
+        }
+        // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
+        // receives the updated encrypted deck
+        uint256 numberPending = game.players.length;
+        for (uint256 i = 0; i < game.players.length; i++) {
+            // we expect that the pads will be appended to the shuffled deck
+            // and we can just ignore them
+            game.roles[i] = uint256(newEncryptedRoles[i]);
+            if (game.status[i] == Status.ACTIVE) {
+                numberPending = numberPending - 1;
+            }
+        }
+
+        // if every player has done the shuffle, we update the state of the game to now allow decryption tokens
+        // here we don't care about anonyminity, so we can don't need to mess with semaphore and nullifier hashes
+        game.status[index] = Status.ACTIVE;
+
+        // Move to the next round
+        if (numberPending == 1) {
+            game.round = Round.Reveal;
+        }
+    }
+
+    function revealRoles(uint256 groupId, uint256 pubKey, bytes calldata proof, bytes32[12] calldata newDecryptedRoles) external {
+        Game storage game = games[groupId];
+        require(game.round == Round.Reveal);
+        // we receive a proof and public input list of roles selected revealed, along with public index of player role 
+        // they should also prove that they own the private key for pubKey
+        // make sure that the index is indeed that player
+        (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
+        require(found);
+        bytes32[] memory _publicInputs = new bytes32[](26);  
+        _publicInputs[0] = bytes32(pubKey); // this is their pubKey
+        _publicInputs[1] = bytes32(index);
+        for (uint256 i = 2; i < 26; i++) {
+            if (i > 13) {
+                _publicInputs[i] = newDecryptedRoles[i - 14];
+            } else {
+                _publicInputs[i] = bytes32(game.roles[i - 2]);
+            }
+        }
+
+        // verify the proof
+        // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
+
+        // update the role array
+        uint256 numberPending = game.players.length;
+        for (uint256 i = 0; i < game.players.length; i++) {
+            // we expect that the pads will be appended to the shuffled deck client-side
+            // and we can just ignore them
+            game.roles[i] = uint256(newDecryptedRoles[i]);
+            if (game.status[i] == Status.ACTIVE) {
+                numberPending = numberPending - 1;
+            }
+        }
+
+        require(game.status[index] == Status.PENDING_ACTION);
+        game.status[index] = Status.ACTIVE;
+        // if every player has published decrypted roles, we update the state of the game to now be the first round
+
+        if (numberPending == 1) {
+            // create playerRoles tree
+            _initializePlayerRolesTree(groupId);
+            // this has the unfortunate consequence where the last person to decrypt pays more gas
+            // not sure how to make this more equitable, but I suppose it's an incentive to decrypt first?
+            game.round = Round.Private;
+        }
+
+    }
+
+    function privateRound(
+        uint256 groupId, 
+        uint256[8] calldata semaphoreProof, 
+        bytes calldata playerProof, 
+        uint256 role,
+        uint256 target,
+        uint256 signal, 
+        uint256 merkleTreeRoot, 
         uint256 nullifierHash,
-        uint256[8] calldata proof
+        uint256 externalNullifier
     ) external {
-        semaphore.verifyProof(groupId, merkleTreeRoot, signal, nullifierHash, groupId, proof);
+        Game storage game = games[groupId];
+        require(game.round == Round.Private);
+        // we receive proof of valid action, action, and semaphore signal
+        // 1. verify, they know a private key for pub key in the tree
+        // 2. and a ciphertext decrypts to specific card role in the tree
+        // 3. that (role, pub_key) is in the validActions tree 
+        // 4. the public input should be the action and target
+        bytes32[] memory _publicInputs = new bytes32[](4);  
+        _publicInputs[0] = bytes32(role);
+        _publicInputs[1] = bytes32(target);
+        _publicInputs[2] = bytes32(game.playerRoles.root);
+        _publicInputs[3] = bytes32(game.validActions.root);
+
+        // require(Verifier.verify(playerProof, _publicInputs), "Invalid proof of public key");
+        // how do we make sure the proof is good? I guess the transaction is just reverted if it fails.
+
+        // TODO: we get "stack too deep" error here, which suggests we need to break these into multiple transactions
+        // and will also need to add some extra accounting in the game state for this..
+
+        // semaphore.verifyProof(groupId, merkleTreeRoot, signal, nullifierHash, externalNullifier, semaphoreProof);
+
+        // the game updates the state according to the action (for now it will just be kills)
+        // the mafia has made a kill
+        if (role == 1) {
+            //kill player
+            // add member to remove list
+        }
+
+        uint256 numberPending = game.players.length;
+        uint256 lastPending = 0;
+        bool foundEliminated = false;
+        for (uint256 i = 0; i < game.players.length; i++) {
+            // we expect that the pads will be appended to the shuffled deck
+            // and we can just ignore them
+            if (game.status[i] != Status.PENDING_ACTION) {
+                numberPending = numberPending - 1;
+            } else {
+                lastPending = i;
+            }
+            if (game.status[i] == Status.WAITING_REVEAL) {
+                foundEliminated = true;
+            }
+        }
+        // if it equals one this means that this transaction is the last pending transaction 
+        if (numberPending != 1) {
+            // the status of players is not actually mapped directly for anonymous purposes
+            // instead we just scan for the next player which is PENDING_ACTION and use it for accounting
+            // the nullifierHash of semaphore will make sure that each player has only voted once
+            game.status[lastPending] = Status.ACTIVE;
+        } else {
+            // once all actions have been cast
+            game.previousRound = Round.Private;
+            if (foundEliminated) {
+                // reset player status
+                _refreshPlayerStatus(groupId);
+                // rotate semaphore group with updated players and update external nullifier
+                _refreshSemaphoreGroup(groupId);
+                game.round = Round.Public;
+            } else {
+                game.round = Round.Announce;
+            }
+        }
     }
+
+    function publicRound(
+        uint256 groupId,
+        uint256 signal, 
+        uint256[8] calldata semaphoreProof, 
+        uint256 merkleTreeRoot, 
+        uint256 nullifierHash,
+        uint256 externalNullifier
+    ) external {
+        Game storage game = games[groupId];
+        require(game.round == Round.Public);
+
+        (bool found, uint256 index) = game.getIndexForPubKey(signal);
+        require(found);
+        // you can't vote against a player who is already eliminated
+        require(game.status[index] != Status.INACTIVE);
+
+        semaphore.verifyProof(groupId, merkleTreeRoot, signal, nullifierHash, externalNullifier, semaphoreProof);
+        game.voteTally[index] = game.voteTally[index] + 1;
+        // we receive votes with semaphore signal — signal is pubKey to vote off
+        // we tally the votes until all players cast vote
+        // once all votes are cast we choose the person with the most votes to deactivate
+        uint256 numberPending = game.players.length;
+        uint256 lastPending = 0;
+        for (uint256 i = 0; i < game.players.length; i++) {
+            // we expect that the pads will be appended to the shuffled deck
+            // and we can just ignore them
+            if (game.status[i] != Status.PENDING_ACTION) {
+                numberPending = numberPending - 1;
+            } else {
+                lastPending = i;
+            }
+        }
+
+        if (numberPending != 1) {
+            // the status of players is not actually mapped directly for anonymous purposes
+            // instead we just scan for the next player which is PENDING_ACTION and use it for accounting
+            // the nullifierHash of semaphore will make sure that each player has only voted once
+            game.status[lastPending] = Status.ACTIVE;
+        } else {
+            // tally the votes
+            uint256 maxVoteIndex = 0;
+            uint256 maxVote = 0;
+
+            //TODO: what to do if there is a tie?
+            for (uint256 i = 0; i < game.players.length; i++) {
+                if (game.voteTally[i] > maxVote) {
+                    maxVoteIndex = i;
+                }
+            }
+
+            game.status[maxVoteIndex] = Status.WAITING_REVEAL;
+            game.previousRound = Round.Public;
+            game.round = Round.Announce;
+        }
+
+    }
+
+    function announceRole(
+        uint256 groupId,
+        bool isMafia,
+        uint256 pubKey,
+        uint256[] calldata validActionProofSiblings,
+        uint8[] calldata validActionPathIndices, 
+        bytes calldata proof
+    ) external {
+        Game storage game = games[groupId]; 
+        require(game.round == Round.Announce);
+
+        (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
+        require(found);
+        // we receive a proof of knowledge of preimage for role which corresponds to a pub_key 
+        // and it checks to make sure this pub_key is in the remove list 
+        // and it checks the corresponding ciphertext decryptes to mafia
+        // we feed in the ciphertext manually
+
+        bytes32[] memory _publicInputs = new bytes32[](2);  
+        _publicInputs[0] = bytes32(pubKey);
+        _publicInputs[1] = bytes32(game.roles[index]);
+        if (isMafia) {
+            // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
+            game.mafiaCounter = game.mafiaCounter - 1;
+        } else {
+            // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
+        }
+        _removePlayerWithPubKey(
+            groupId, 
+            pubKey,
+            validActionProofSiblings,
+            validActionPathIndices
+        );
+        
+        // once everyone has announced their role we check endgame conditions
+        if (game.mafiaCounter == 0) {
+            // end game condition, the villagers win
+            game.round = Round.End;
+            return;
+        }
+
+        uint256 remainingPlayers = game.players.length;
+        bool stillPendingAnnouncements = false;
+        for (uint256 i = 0; i < game.players.length; i++) {
+            if (game.status[i] == Status.INACTIVE) {
+                remainingPlayers = remainingPlayers - 1;
+            }
+            if (game.status[i] == Status.WAITING_REVEAL) {
+                stillPendingAnnouncements = true;
+            }
+        }
+
+        if (remainingPlayers == game.mafiaCounter) {
+            game.round = Round.End;
+            return;
+        } 
+
+        if (!stillPendingAnnouncements) {
+            // update player status
+            _refreshPlayerStatus(groupId);
+            // update valid action table
+            _refreshValidActionsTable(groupId);
+            // rotate semaphore group with updated players and update external nullifier
+            _refreshSemaphoreGroup(groupId);
+
+            if (game.previousRound == Round.Private) {
+                game.round = Round.Public;
+            } else {
+                _resetVoteTally(groupId);
+                game.round = Round.Private;
+            }
+        }
+    }
+
+    function endGame() external {
+        // purely an "ideological victory"
+        // the winner will be villagers if mafiaCounter is 0
+        //for now we can just emit an event
+    }
+    
 }
