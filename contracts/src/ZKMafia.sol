@@ -23,16 +23,16 @@ contract ZKMafia is ZKMafiaGame {
         // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
 
         // create new game
-        uint256 groupId = _createGame();
+        uint256 gameId = _createGame();
 
         // call joinGame for the player
-        _joinGame(groupId, identityCommitment, pubKey);
+        _joinGame(gameId, identityCommitment, pubKey);
 
-        return groupId;
+        return gameId;
     }
 
-    function joinGame(uint256 groupId, uint256 identityCommitment, uint256 pubKey, bytes calldata proof) external {
-        Game storage game = games[groupId];
+    function joinGame(uint256 gameId, uint256 identityCommitment, uint256 pubKey, bytes calldata proof) external {
+        Game storage game = games[gameId];
         require(game.round == Round.Lobby);
         (bool exists, uint256 index) = game.getIndexForPubKey(pubKey);
         // TODO: max limit on number of players?
@@ -47,15 +47,15 @@ contract ZKMafia is ZKMafiaGame {
         // we'll have a handful of verify contracts, so going to have to keep track of them all somehow
         // require(Verifier.verify(proof, _publicInputs), "Invalid proof of public key");
 
-        _joinGame(groupId, identityCommitment, pubKey);
+        _joinGame(gameId, identityCommitment, pubKey);
     }
 
 
-    function startGame(uint256 groupId, uint256 aggregateKey, bytes calldata proof) external {
-        Game storage game = games[groupId];
+    function startGame(uint256 gameId, uint256 aggregateKey, bytes calldata proof) external {
+        Game storage game = games[gameId];
         require(game.round == Round.Lobby);
         //TODO: min limit on number of players?
-        require(game.players.length >= 3);
+        require(game.players.length > 2);
 
         // we'll have a handful of verify contracts, so going to have to keep track of them all somehow
         // this proof should both prove the pubKey is theirs (and also prove the aggregate key is correct??)
@@ -70,11 +70,11 @@ contract ZKMafia is ZKMafiaGame {
         // require(Verifier.verify(proof, _publicInputs), "Invalid proof of public key");
 
         // update the game state
-        _startGame(groupId);
+        _startGame(gameId);
     }
 
-    function publishShuffle(uint256 groupId, uint256 pubKey, bytes calldata proof, bytes32[12] calldata newEncryptedRoles) external {
-        Game storage game = games[groupId];
+    function publishShuffle(uint256 gameId, uint256 pubKey, bytes calldata proof, bytes32[12] calldata newEncryptedRoles) external {
+        Game storage game = games[gameId];
         require(game.round == Round.Shuffle);
 
         // if every player has done the shuffle, we update the state of the game to now allow decryption tokens
@@ -90,10 +90,9 @@ contract ZKMafia is ZKMafiaGame {
         _publicInputs[0] = bytes32(pubKey); // this is their pubKey
         _publicInputs[1] = bytes32(game.aggregateKey);
         // we fix the top size of the game to 12, and if there are less than 12 players, we will pad the inputs
-        uint256 padValue = 2 ** 128;
         for (uint256 i = 2; i < 14; i++) {
-            if (i > game.players.length) {
-                _publicInputs[i] = bytes32(padValue);
+            if (i > game.players.length - 1) {
+                _publicInputs[i] = bytes32(0);
             } else {
                 _publicInputs[i] = bytes32(game.roles[i-2]);
             }
@@ -120,11 +119,12 @@ contract ZKMafia is ZKMafiaGame {
         // Move to the next round
         if (numberPending == 1) {
             game.round = Round.Reveal;
+            _refreshPlayerStatus(gameId);
         }
     }
 
-    function revealRoles(uint256 groupId, uint256 pubKey, bytes calldata proof, bytes32[12] calldata newDecryptedRoles) external {
-        Game storage game = games[groupId];
+    function revealRoles(uint256 gameId, uint256 pubKey, bytes calldata proof, bytes32[12] calldata newDecryptedRoles) external {
+        Game storage game = games[gameId];
         require(game.round == Round.Reveal);
         // we receive a proof and public input list of roles selected revealed, along with public index of player role 
         // they should also prove that they own the private key for pubKey
@@ -138,7 +138,12 @@ contract ZKMafia is ZKMafiaGame {
             if (i > 13) {
                 _publicInputs[i] = newDecryptedRoles[i - 14];
             } else {
-                _publicInputs[i] = bytes32(game.roles[i - 2]);
+                // the default pad value is zero
+                if (i > game.players.length - 1){
+                    _publicInputs[i] = bytes32(0);
+                } else {
+                    _publicInputs[i] = bytes32(game.roles[i - 2]);
+                }
             }
         }
 
@@ -162,7 +167,8 @@ contract ZKMafia is ZKMafiaGame {
 
         if (numberPending == 1) {
             // create playerRoles tree
-            _initializePlayerRolesTree(groupId);
+            _initializePlayerRolesTree(gameId);
+            _refreshPlayerStatus(gameId);
             // this has the unfortunate consequence where the last person to decrypt pays more gas
             // not sure how to make this more equitable, but I suppose it's an incentive to decrypt first?
             game.round = Round.Private;
@@ -171,47 +177,52 @@ contract ZKMafia is ZKMafiaGame {
     }
 
     function privateRound(
-        uint256 groupId, 
+        uint256 gameId, 
         uint256[8] calldata semaphoreProof, 
         bytes calldata playerProof, 
         uint256 role,
-        uint256 target,
         uint256 signal, 
         uint256 merkleTreeRoot, 
         uint256 nullifierHash,
         uint256 externalNullifier
     ) external {
-        Game storage game = games[groupId];
+        Game storage game = games[gameId];
         require(game.round == Round.Private);
+        require(externalNullifier == game.numRounds);
         // we receive proof of valid action, action, and semaphore signal
         // 1. verify, they know a private key for pub key in the tree
         // 2. and a ciphertext decrypts to specific card role in the tree
         // 3. that (role, pub_key) is in the validActions tree 
         // 4. the public input should be the action and target
-        bytes32[] memory _publicInputs = new bytes32[](4);  
-        _publicInputs[0] = bytes32(role);
-        _publicInputs[1] = bytes32(target);
-        _publicInputs[2] = bytes32(game.playerRoles.root);
-        _publicInputs[3] = bytes32(game.validActions.root);
-
-        // require(Verifier.verify(playerProof, _publicInputs), "Invalid proof of public key");
-        // how do we make sure the proof is good? I guess the transaction is just reverted if it fails.
-
-        // TODO: we get "stack too deep" error here, which suggests we need to break these into multiple transactions
-        // and will also need to add some extra accounting in the game state for this..
-
-        // semaphore.verifyProof(groupId, merkleTreeRoot, signal, nullifierHash, externalNullifier, semaphoreProof);
+        _privateRoundChecks(
+            gameId,
+            merkleTreeRoot,
+            role,
+            signal,
+            nullifierHash,
+            externalNullifier,
+            semaphoreProof,
+            playerProof
+        );
 
         // the game updates the state according to the action (for now it will just be kills)
         // the mafia has made a kill
         if (role == 1) {
-            //kill player
+            // kill player
+            // we can overload the voteTally for now to track pending kills
             // add member to remove list
+
+            // NOTE: we will let the mafia choose not to kill anyone ??
+            if (signal != 0) {
+                (bool found, uint256 index) = game.getIndexForPubKey(signal);
+                require(found);
+                
+                game.voteTally[index] = 1;
+            }
         }
 
         uint256 numberPending = game.players.length;
         uint256 lastPending = 0;
-        bool foundEliminated = false;
         for (uint256 i = 0; i < game.players.length; i++) {
             // we expect that the pads will be appended to the shuffled deck
             // and we can just ignore them
@@ -219,9 +230,6 @@ contract ZKMafia is ZKMafiaGame {
                 numberPending = numberPending - 1;
             } else {
                 lastPending = i;
-            }
-            if (game.status[i] == Status.WAITING_REVEAL) {
-                foundEliminated = true;
             }
         }
         // if it equals one this means that this transaction is the last pending transaction 
@@ -233,11 +241,18 @@ contract ZKMafia is ZKMafiaGame {
         } else {
             // once all actions have been cast
             game.previousRound = Round.Private;
-            if (foundEliminated) {
+            bool foundEliminated = false;
+            for (uint256 i = 0; i < game.voteTally.length; i++) {
+                if (game.voteTally[i] == 1) {
+                    game.status[i] = Status.WAITING_REVEAL;
+                    foundEliminated = true;
+                }
+            }
+
+            game.numRounds++;
+            if (!foundEliminated) {
                 // reset player status
-                _refreshPlayerStatus(groupId);
-                // rotate semaphore group with updated players and update external nullifier
-                _refreshSemaphoreGroup(groupId);
+                _refreshPlayerStatus(gameId);
                 game.round = Round.Public;
             } else {
                 game.round = Round.Announce;
@@ -246,14 +261,15 @@ contract ZKMafia is ZKMafiaGame {
     }
 
     function publicRound(
-        uint256 groupId,
+        uint256 gameId,
         uint256 signal, 
         uint256[8] calldata semaphoreProof, 
         uint256 merkleTreeRoot, 
         uint256 nullifierHash,
         uint256 externalNullifier
     ) external {
-        Game storage game = games[groupId];
+        Game storage game = games[gameId];
+        require(externalNullifier == game.numRounds);
         require(game.round == Round.Public);
 
         (bool found, uint256 index) = game.getIndexForPubKey(signal);
@@ -261,7 +277,7 @@ contract ZKMafia is ZKMafiaGame {
         // you can't vote against a player who is already eliminated
         require(game.status[index] != Status.INACTIVE);
 
-        semaphore.verifyProof(groupId, merkleTreeRoot, signal, nullifierHash, externalNullifier, semaphoreProof);
+        semaphore.verifyProof(gameId, merkleTreeRoot, signal, nullifierHash, externalNullifier, semaphoreProof);
         game.voteTally[index] = game.voteTally[index] + 1;
         // we receive votes with semaphore signal — signal is pubKey to vote off
         // we tally the votes until all players cast vote
@@ -287,11 +303,13 @@ contract ZKMafia is ZKMafiaGame {
             // tally the votes
             uint256 maxVoteIndex = 0;
             uint256 maxVote = 0;
+            game.numRounds++;
 
             //TODO: what to do if there is a tie?
             for (uint256 i = 0; i < game.players.length; i++) {
                 if (game.voteTally[i] > maxVote) {
                     maxVoteIndex = i;
+                    maxVote = game.voteTally[i];
                 }
             }
 
@@ -303,14 +321,14 @@ contract ZKMafia is ZKMafiaGame {
     }
 
     function announceRole(
-        uint256 groupId,
+        uint256 gameId,
         bool isMafia,
         uint256 pubKey,
         uint256[] calldata validActionProofSiblings,
         uint8[] calldata validActionPathIndices, 
         bytes calldata proof
     ) external {
-        Game storage game = games[groupId]; 
+        Game storage game = games[gameId]; 
         require(game.round == Round.Announce);
 
         (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
@@ -330,7 +348,7 @@ contract ZKMafia is ZKMafiaGame {
             // require(Verifier.verify(_proof, _publicInputs), "Invalid proof of public key");
         }
         _removePlayerWithPubKey(
-            groupId, 
+            gameId, 
             pubKey,
             validActionProofSiblings,
             validActionPathIndices
@@ -361,16 +379,14 @@ contract ZKMafia is ZKMafiaGame {
 
         if (!stillPendingAnnouncements) {
             // update player status
-            _refreshPlayerStatus(groupId);
+            _refreshPlayerStatus(gameId);
             // update valid action table
-            _refreshValidActionsTable(groupId);
-            // rotate semaphore group with updated players and update external nullifier
-            _refreshSemaphoreGroup(groupId);
+            _refreshValidActionsTable(gameId);
 
             if (game.previousRound == Round.Private) {
                 game.round = Round.Public;
             } else {
-                _resetVoteTally(groupId);
+                _resetVoteTally(gameId);
                 game.round = Round.Private;
             }
         }

@@ -21,7 +21,6 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
     using IncrementalBinaryTree for IncrementalTreeData;
     using ZKMafiaInstance for Game;
 
-    // ISemaphore public semaphore;
     uint256 internal _gameCounter;
 
     // A new semaphore group is created each game 
@@ -29,26 +28,28 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
     // is not present in this group they cannot play.
     ISemaphore semaphore;     
 
-    // groupId => Game
+    // gameId => Game
     mapping(uint256 => Game) internal games;
 
     function _createGame() internal virtual returns (uint256) {
 
-        uint256 groupId = _gameCounter;
-        semaphore.createGroup(groupId, 20, address(this));
-        games[groupId].init(groupId);
+        uint256 gameId = _gameCounter;
+        _gameCounter++;
+        semaphore.createGroup(gameId, 20, address(this));
+        games[gameId].init(gameId);
 
-        return groupId;
+        emit GameCreated(gameId);
+        return gameId;
     }
 
-    function _joinGame(uint256 groupId, uint256 identityCommitment, uint256 pubKey) internal virtual {
-        Game storage game = games[groupId];
+    function _joinGame(uint256 gameId, uint256 identityCommitment, uint256 pubKey) internal virtual {
+        Game storage game = games[gameId];
         game.players.push(pubKey);
-        semaphore.addMember(groupId, identityCommitment);
+        semaphore.addMember(gameId, identityCommitment);
     }
 
-    function _startGame(uint256 groupId) internal virtual {
-        Game storage game = games[groupId];
+    function _startGame(uint256 gameId) internal virtual {
+        Game storage game = games[gameId];
 
         uint256 numPlayers = game.players.length;
 
@@ -59,12 +60,13 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
         }
         uint256 villager = 0;
         uint256 mafia = 1;
+        uint256 actionHash = 0;
 
         // insert all pubKeys into the tree
         // update the status of players now that game has started
         // initialize arrays
         for (uint256 i = 0; i < game.players.length; i++) {
-            uint256 playerKey = game.players[i];
+            // uint256 playerKey = game.players[i];
 
             game.status.push(Status.PENDING_ACTION);
             // game.pubKeys.insert(playerKey);
@@ -76,9 +78,11 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
                 game.roles.push(villager);
             }
             // add the validActions to the tree
+            actionHash = uint256(keccak256(abi.encodePacked(mafia, game.players[i]))) >> 8;
             game.validActions.insert(
-                uint256(keccak256(abi.encodePacked(mafia, game.players[i])))
+                actionHash
             );
+            emit ValidActionAdded(gameId, game.validActions.numberOfLeaves - 1, actionHash, game.validActions.root);
             game.validActionsTable.push(
                 ValidAction({
                     role: 1,
@@ -95,28 +99,27 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
             })
         );
         // add the validActions to the tree
+        actionHash = uint256(keccak256(abi.encodePacked(villager, villager))) >> 8;
         game.validActions.insert(
-            uint256(keccak256(abi.encodePacked(villager, villager)))
+            actionHash
         );
+        emit ValidActionAdded(gameId, game.validActions.numberOfLeaves - 1, actionHash, game.validActions.root);
 
         game.round = Round.Shuffle;
     }
 
-    function _initializePlayerRolesTree(uint256 groupId) internal virtual {
-        Game storage game = games[groupId];
+    function _initializePlayerRolesTree(uint256 gameId) internal virtual {
+        Game storage game = games[gameId];
         for (uint256 i = 0; i < game.roles.length; i++) {
-            uint256 leaf = uint256(keccak256(abi.encodePacked(game.players[i], game.roles[i])));
-            game.playerRoles.insert(leaf);
+            uint256 roleHash = uint256(keccak256(abi.encodePacked(game.players[i], game.roles[i]))) >> 8;
+            game.playerRoles.insert(roleHash);
+            emit PlayerRoleAdded(gameId, game.playerRoles.numberOfLeaves - 1, roleHash, game.playerRoles.root);
         }
     }
 
 
-    function _refreshSemaphoreGroup(uint256 groupId) internal virtual {
-        semaphore.createGroup(groupId, 20, address(this));
-    }
-
-    function _refreshPlayerStatus(uint256 groupId) internal virtual {
-        Game storage game = games[groupId];
+    function _refreshPlayerStatus(uint256 gameId) internal virtual {
+        Game storage game = games[gameId];
         for (uint256 i = 0; i < game.players.length; i++) {
             if (game.status[i] == Status.ACTIVE) {
                 game.status[i] = Status.PENDING_ACTION;
@@ -124,8 +127,8 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
         }
     } 
 
-    function _refreshValidActionsTable(uint256 groupId) internal virtual {
-        Game storage game = games[groupId];
+    function _refreshValidActionsTable(uint256 gameId) internal virtual {
+        Game storage game = games[gameId];
         uint256[] storage remainingPlayers;
 
         delete game.validActionsTable;
@@ -150,28 +153,54 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
 
 
     function _removePlayerWithPubKey(
-        uint256 groupId, 
+        uint256 gameId, 
         uint256 pubKey, 
         uint256[] calldata proofSiblings,
         uint8[] calldata proofPathIndices
     ) internal virtual {
-        Game storage game = games[groupId];
+        Game storage game = games[gameId];
         (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
         require(found);
         require(game.status[index] == Status.WAITING_REVEAL);
 
         uint256 mafia = 1;
-        uint256 leaf = uint256(keccak256(abi.encodePacked(mafia, pubKey)));
+        uint256 actionHash = uint256(keccak256(abi.encodePacked(mafia, pubKey))) >> 8;
         game.validActions.remove(
-            leaf,
+            actionHash,
             proofSiblings,
             proofPathIndices
         );
+        emit ValidActionRemoved(gameId, game.validActions.numberOfLeaves - 1, actionHash, game.validActions.root);
         game.status[index] = Status.INACTIVE;
     }
 
-    function _resetVoteTally(uint256 groupId) internal virtual {
-        Game storage game = games[groupId];
+    function _privateRoundChecks(
+        uint256 gameId,
+        uint256 merkleTreeRoot,
+        uint256 role,
+        uint256 signal,
+        uint256 nullifierHash,
+        uint256 externalNullifier,
+        uint256 [8] calldata semaphoreProof,
+        bytes calldata playerProof
+    ) internal virtual {
+        Game storage game = games[gameId];
+        require(game.round == Round.Private);
+
+        bytes32[] memory _publicInputs = new bytes32[](4);  
+        _publicInputs[0] = bytes32(role);
+        _publicInputs[1] = bytes32(signal);
+        _publicInputs[2] = bytes32(game.playerRoles.root);
+        _publicInputs[3] = bytes32(game.validActions.root);
+
+        // require(Verifier.verify(playerProof, _publicInputs), "Invalid proof of public key");
+        // how do we make sure the proof is good? I guess the transaction is just reverted if it fails.
+
+        semaphore.verifyProof(gameId, merkleTreeRoot, signal, nullifierHash, externalNullifier, semaphoreProof);
+    }
+
+    function _resetVoteTally(uint256 gameId) internal virtual {
+        Game storage game = games[gameId];
         for (uint256 i = 0; i < game.players.length; i++) {
             game.voteTally[i] = 0;
         }
@@ -181,12 +210,25 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
     // we need a function to compute the aggregate public key and also to do the decryption
     // like an "el gamal" contract
 
-    function getRoleForPlayer(uint256 playerPubKey) external view returns (uint256) {
+    // function getRoleForPlayer(uint256 playerPubKey) external view returns (uint256) {
 
-    }
+    // }
 
 
-    function getActiveGroupForGame(uint256 gameId) external view returns (uint256) {
+    function getGameInfoForGameId(uint256 gameId) external view returns (GameInfo memory) {
+        Game storage game = games[gameId];
+        GameInfo memory gameInfo = GameInfo({
+            round: game.round,
+            previousRound: game.previousRound,
+            numRounds: game.numRounds,
+            aggregateKey: game.aggregateKey,
+            mafiaCounter: game.mafiaCounter,
+            roles: game.roles,
+            players: game.players,
+            status: game.status,
+            validActionsTable: game.validActionsTable
+        });
 
+        return gameInfo;
     }
 }

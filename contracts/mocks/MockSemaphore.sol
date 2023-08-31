@@ -172,13 +172,17 @@ contract MockSemaphore is ISemaphore, SemaphoreGroups {
         //     }
         // }
 
-        // if (groups[groupId].nullifierHashes[nullifierHash]) {
-        //     revert Semaphore__YouAreUsingTheSameNillifierTwice();
-        // }
+        if (groups[groupId].nullifierHashes[nullifierHash]) {
+            revert Semaphore__YouAreUsingTheSameNillifierTwice();
+        }
 
-        verifier.verifyProof(merkleTreeRoot, nullifierHash, signal, externalNullifier, proof, merkleTreeDepth);
+        // We're going to make the default behavior of verifyProof to just be "true" for testing purposes
+        // if we want to test "false" behavior we can configure this in the constructor and have to separate instances
+        // in the tests
 
+        // verifier.verifyProof(merkleTreeRoot, nullifierHash, signal, externalNullifier, proof, merkleTreeDepth);
         groups[groupId].nullifierHashes[nullifierHash] = true;
+
 
         emit ProofVerified(groupId, merkleTreeRoot, nullifierHash, externalNullifier, signal);
     }

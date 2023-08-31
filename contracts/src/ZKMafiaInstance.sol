@@ -30,6 +30,7 @@ struct Game {
     Round round;
     Round previousRound;
     uint256 aggregateKey;
+    uint256 numRounds;
 
     // (this array is overloaded to track shuffles, remasking, actions, and cast of votes)
     // 0 means inactive (or eliminated)
@@ -57,14 +58,27 @@ struct Game {
     IncrementalTreeData validActions;
 }
 
+struct GameInfo {
+    Round round;
+    Round previousRound;
+    uint256 numRounds;
+    uint256 aggregateKey;
+    uint8 mafiaCounter;
+    uint256[] roles;
+    uint256[] players;
+    Status[] status;
+    ValidAction[] validActionsTable;
+}
+
 library ZKMafiaInstance {
     using IncrementalBinaryTree for IncrementalTreeData;
 
     function init(
         Game storage self,
-        uint256 groupId
+        uint256 gameId
     ) public {
-        uint256 zeroValue = uint256(keccak256(abi.encodePacked(groupId))) >> 8;
+        uint256 zeroValue = uint256(keccak256(abi.encodePacked(gameId))) >> 8;
+        self.numRounds = 0; // this is used as externalNullifier
 
         //initialize merkle trees
         // self.pubKeys.init(8, zeroValue);
