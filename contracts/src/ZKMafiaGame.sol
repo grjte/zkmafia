@@ -82,7 +82,6 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
             game.validActions.insert(
                 actionHash
             );
-            emit ValidActionAdded(gameId, game.validActions.numberOfLeaves - 1, actionHash, game.validActions.root);
             game.validActionsTable.push(
                 ValidAction({
                     role: 1,
@@ -103,7 +102,6 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
         game.validActions.insert(
             actionHash
         );
-        emit ValidActionAdded(gameId, game.validActions.numberOfLeaves - 1, actionHash, game.validActions.root);
 
         game.round = Round.Shuffle;
     }
@@ -113,7 +111,6 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
         for (uint256 i = 0; i < game.roles.length; i++) {
             uint256 roleHash = uint256(keccak256(abi.encodePacked(game.players[i], game.roles[i]))) >> 8;
             game.playerRoles.insert(roleHash);
-            emit PlayerRoleAdded(gameId, game.playerRoles.numberOfLeaves - 1, roleHash, game.playerRoles.root);
         }
     }
 
@@ -155,23 +152,63 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
     function _removePlayerWithPubKey(
         uint256 gameId, 
         uint256 pubKey, 
-        uint256[] calldata proofSiblings,
-        uint8[] calldata proofPathIndices
+        uint256 identityCommitment,
+        uint256[] calldata semaphoreProofSiblings,
+        uint8[] calldata semaphorePathIndices
     ) internal virtual {
         Game storage game = games[gameId];
         (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
         require(found);
         require(game.status[index] == Status.WAITING_REVEAL);
 
-        uint256 mafia = 1;
-        uint256 actionHash = uint256(keccak256(abi.encodePacked(mafia, pubKey))) >> 8;
-        game.validActions.remove(
-            actionHash,
-            proofSiblings,
-            proofPathIndices
+        semaphore.removeMember(
+            gameId,
+            identityCommitment,
+            semaphoreProofSiblings,
+            semaphorePathIndices
         );
-        emit ValidActionRemoved(gameId, game.validActions.numberOfLeaves - 1, actionHash, game.validActions.root);
+
         game.status[index] = Status.INACTIVE;
+    }
+
+    function _updateValidActionsTree(
+        uint256 gameId
+    ) internal virtual {
+        Game storage game = games[gameId];
+        uint256 mafia = 1;
+        uint256 villager = 0;
+
+        //we will completely reset, because we are not incrementally updating it and the call would require too many merkle proofs
+        delete game.validActions;
+        delete game.validActionsTable;
+
+        uint256 zeroValue = uint256(keccak256(abi.encodePacked(gameId))) >> 8;
+        uint256 actionHash = 0;
+        game.validActions.init(8, zeroValue);
+
+        for (uint256 i = 0; i < game.players.length; i++) {
+            if (game.status[i] != Status.INACTIVE) {
+                actionHash = uint256(keccak256(abi.encodePacked(mafia, game.players[i]))) >> 8;
+                game.validActions.insert(actionHash);
+                game.validActionsTable.push(ValidAction({
+                    role: mafia,
+                    target: game.players[i]
+                }));
+            }
+        }
+
+        // fill out validActionsTable
+        game.validActionsTable.push(
+            ValidAction({
+                role: 0,
+                target: 0 
+            })
+        );
+        // add the validActions to the tree
+        actionHash = uint256(keccak256(abi.encodePacked(villager, villager))) >> 8;
+        game.validActions.insert(
+            actionHash
+        );
     }
 
     function _privateRoundChecks(
@@ -205,14 +242,6 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
             game.voteTally[i] = 0;
         }
     }
-
-    // TODO:
-    // we need a function to compute the aggregate public key and also to do the decryption
-    // like an "el gamal" contract
-
-    // function getRoleForPlayer(uint256 playerPubKey) external view returns (uint256) {
-
-    // }
 
 
     function getGameInfoForGameId(uint256 gameId) external view returns (GameInfo memory) {

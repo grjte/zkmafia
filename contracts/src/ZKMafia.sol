@@ -324,8 +324,9 @@ contract ZKMafia is ZKMafiaGame {
         uint256 gameId,
         bool isMafia,
         uint256 pubKey,
-        uint256[] calldata validActionProofSiblings,
-        uint8[] calldata validActionPathIndices, 
+        uint256 identityCommitment,
+        uint256[] calldata semaphoreProofSiblings,
+        uint8[] calldata semaphorePathIndices,
         bytes calldata proof
     ) external {
         Game storage game = games[gameId]; 
@@ -350,8 +351,9 @@ contract ZKMafia is ZKMafiaGame {
         _removePlayerWithPubKey(
             gameId, 
             pubKey,
-            validActionProofSiblings,
-            validActionPathIndices
+            identityCommitment,
+            semaphoreProofSiblings,
+            semaphorePathIndices
         );
         
         // once everyone has announced their role we check endgame conditions
@@ -361,6 +363,11 @@ contract ZKMafia is ZKMafiaGame {
             return;
         }
 
+        _announceRoleCheckPending(gameId);
+    }
+
+    function _announceRoleCheckPending(uint256 gameId) internal virtual {
+        Game storage game = games[gameId];
         uint256 remainingPlayers = game.players.length;
         bool stillPendingAnnouncements = false;
         for (uint256 i = 0; i < game.players.length; i++) {
