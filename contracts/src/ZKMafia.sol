@@ -2,7 +2,10 @@
 pragma solidity ^0.8.4;
 
 // import "@semaphore/interfaces/ISemaphore.sol";
-// import "@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol";
+import {PoseidonT3} from "poseidon-solidity/PoseidonT3.sol";
+import "@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol";
+import "@semaphore/base/SemaphoreVerifier.sol";
+import "@semaphore/base/Pairing.sol";
 import "./ZKMafiaGame.sol";
 import "./ZKMafiaInstance.sol";
 
@@ -10,7 +13,7 @@ contract ZKMafia is ZKMafiaGame {
     using ZKMafiaInstance for Game;
     
     constructor(address semaphoreAddress) {
-        semaphore = ISemaphore(semaphoreAddress);
+        semaphore = Semaphore(semaphoreAddress);
     }
 
     function createGame(uint256 identityCommitment, uint256 pubKey) external returns (uint256) {

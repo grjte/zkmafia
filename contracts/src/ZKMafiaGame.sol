@@ -1,7 +1,7 @@
 //SPDX-License-Identifier: MIT
 pragma solidity ^0.8.4;
 
-import "@semaphore/interfaces/ISemaphore.sol";
+import "@semaphore/Semaphore.sol";
 import "@zk-kit/incremental-merkle-tree.sol/IncrementalBinaryTree.sol";
 import {PoseidonT3} from "poseidon-solidity/PoseidonT3.sol";
 
@@ -26,7 +26,7 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
     // A new semaphore group is created each game 
     // this defacto serves as the player status. If the player
     // is not present in this group they cannot play.
-    ISemaphore semaphore;     
+    Semaphore semaphore;     
 
     // gameId => Game
     mapping(uint256 => Game) internal games;
