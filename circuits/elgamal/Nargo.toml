@@ -1,0 +1,7 @@
+[package]
+name = "elgamal"
+type = "lib"
+authors = ["goblinoats"]
+compiler_version = "0.10.5"
+
+[dependencies]

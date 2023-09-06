@@ -334,8 +334,8 @@ contract ZKMafia is ZKMafiaGame {
 
         (bool found, uint256 index) = game.getIndexForPubKey(pubKey);
         require(found);
+        require(game.status[index] == Status.WAITING_REVEAL);
         // we receive a proof of knowledge of preimage for role which corresponds to a pub_key 
-        // and it checks to make sure this pub_key is in the remove list 
         // and it checks the corresponding ciphertext decryptes to mafia
         // we feed in the ciphertext manually
 
