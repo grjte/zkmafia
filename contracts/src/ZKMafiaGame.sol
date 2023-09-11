@@ -42,9 +42,10 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
         return gameId;
     }
 
-    function _joinGame(uint256 gameId, uint256 identityCommitment, uint256 pubKey) internal virtual {
+    function _joinGame(uint256 gameId, uint256 identityCommitment, uint256 pubKey, string memory handle) internal virtual {
         Game storage game = games[gameId];
         game.players.push(pubKey);
+        game.handles.push(handle);
         semaphore.addMember(gameId, identityCommitment);
     }
 
@@ -253,6 +254,7 @@ abstract contract ZKMafiaGame is IZKMafiaGame {
             aggregateKey: game.aggregateKey,
             mafiaCounter: game.mafiaCounter,
             roles: game.roles,
+            handles: game.handles,
             players: game.players,
             status: game.status,
             validActionsTable: game.validActionsTable

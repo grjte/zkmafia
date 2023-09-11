@@ -16,7 +16,7 @@ contract ZKMafia is ZKMafiaGame {
         semaphore = Semaphore(semaphoreAddress);
     }
 
-    function createGame(uint256 identityCommitment, uint256 pubKey) external returns (uint256) {
+    function createGame(uint256 identityCommitment, uint256 pubKey, string calldata handle, bytes calldata proof) external returns (uint256) {
         // validate proof they know the secret_key for pub_key 
         // pub_key is added to game array
         bytes32[] memory _publicInputs = new bytes32[](1); 
@@ -29,12 +29,12 @@ contract ZKMafia is ZKMafiaGame {
         uint256 gameId = _createGame();
 
         // call joinGame for the player
-        _joinGame(gameId, identityCommitment, pubKey);
+        _joinGame(gameId, identityCommitment, pubKey, handle);
 
         return gameId;
     }
 
-    function joinGame(uint256 gameId, uint256 identityCommitment, uint256 pubKey, bytes calldata proof) external {
+    function joinGame(uint256 gameId, uint256 identityCommitment, uint256 pubKey, string calldata handle, bytes calldata proof) external {
         Game storage game = games[gameId];
         require(game.round == Round.Lobby);
         (bool exists, uint256 index) = game.getIndexForPubKey(pubKey);
@@ -50,7 +50,7 @@ contract ZKMafia is ZKMafiaGame {
         // we'll have a handful of verify contracts, so going to have to keep track of them all somehow
         // require(Verifier.verify(proof, _publicInputs), "Invalid proof of public key");
 
-        _joinGame(gameId, identityCommitment, pubKey);
+        _joinGame(gameId, identityCommitment, pubKey, handle);
     }
 
 

@@ -39,6 +39,8 @@ struct Game {
     // 3 means eliminated, waiting to announce role
     Status[] status;
 
+    string[] handles;
+
     // players in the game: pubKey 
     uint256[] players; 
     
@@ -65,6 +67,7 @@ struct GameInfo {
     uint256 aggregateKey;
     uint8 mafiaCounter;
     uint256[] roles;
+    string[] handles;
     uint256[] players;
     Status[] status;
     ValidAction[] validActionsTable;
