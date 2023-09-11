@@ -119,7 +119,8 @@ contract ZKMafiaTest is Test {
     }
 
     function testCreateGame() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
+        bytes memory fakeBytes = new bytes(32);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
         GameInfo memory gameInfo = game.getGameInfoForGameId(gameId);
         bool stateLooksOk = gameId == 0 && 
             gameInfo.round == Round.Lobby && 
@@ -130,8 +131,8 @@ contract ZKMafiaTest is Test {
 
     function testJoinGame() public {
         bytes memory fakeBytes = new bytes(32);
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
         GameInfo memory gameInfo = game.getGameInfoForGameId(gameId);
         bool stateLooksOk = gameId == 0 && 
             gameInfo.round == Round.Lobby && 
@@ -142,10 +143,10 @@ contract ZKMafiaTest is Test {
     }
 
     function testStartGame() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
         bytes memory fakeBytes = new bytes(32);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
-        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
+        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, "Bob", fakeBytes);
 
         game.startGame(gameId, fakeAggregate, fakeBytes);
 
@@ -161,10 +162,10 @@ contract ZKMafiaTest is Test {
     }
 
     function testPublishShuffleSingleIteration() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
         bytes memory fakeBytes = new bytes(32);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
-        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
+        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, "Bob", fakeBytes);
 
         game.startGame(gameId, fakeAggregate, fakeBytes);
 
@@ -181,10 +182,10 @@ contract ZKMafiaTest is Test {
     }
 
     function testRevealRolesSingleIteration() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
         bytes memory fakeBytes = new bytes(32);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
-        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
+        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, "Bob", fakeBytes);
 
         game.startGame(gameId, fakeAggregate, fakeBytes);
 
@@ -207,10 +208,10 @@ contract ZKMafiaTest is Test {
     }
 
     function testPrivateRound() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
         bytes memory fakeBytes = new bytes(32);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
-        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
+        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, "Bob", fakeBytes);
 
         game.startGame(gameId, fakeAggregate, fakeBytes);
 
@@ -248,10 +249,10 @@ contract ZKMafiaTest is Test {
 
 
     function testPublicRound() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
         bytes memory fakeBytes = new bytes(32);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
-        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
+        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, "Bob", fakeBytes);
 
         game.startGame(gameId, fakeAggregate, fakeBytes);
 
@@ -283,10 +284,10 @@ contract ZKMafiaTest is Test {
     }
 
     function testAnnounce() public {
-        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey);
         bytes memory fakeBytes = new bytes(32);
-        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, fakeBytes);
-        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, fakeBytes);
+        uint256 gameId = game.createGame(player1.identityCommitment, player1.pubKey, "Roboto", fakeBytes);
+        game.joinGame(gameId, player2.identityCommitment, player2.pubKey, "Alice", fakeBytes);
+        game.joinGame(gameId, player3.identityCommitment, player3.pubKey, "Bob", fakeBytes);
 
         game.startGame(gameId, fakeAggregate, fakeBytes);
 
