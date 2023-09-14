@@ -6,14 +6,15 @@
     "anvil": "source .env && anvil --fork-url $ANVIL_FORK_URL --chain-id $ANVIL_CHAIN_ID",
     "build": "npm run wagmi && next build",
     "deploy": "source .env && forge create contracts/src/Counter.sol:Counter --rpc-url $FORGE_RPC_URL --private-key $FORGE_PRIVATE_KEY --etherscan-api-key $ETHERSCAN_API_KEY --verify",
+    "deploy:hh": "npx hardhat run --network localhost scripts/deploy.js",
     "deploy:anvil": "source .env && forge create contracts/src/Counter.sol:Counter --rpc-url http://127.0.0.1:8545 --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80",
     "dev": "npm run wagmi && next dev",
-    "dev:foundry": "npm run dev & wagmi generate --watch & npm run anvil",
     "start": "next start",
     "lint": "next lint",
     "wagmi": "wagmi generate"
   },
   "dependencies": {
+    "@noble/curves": "^1.2.0",
     "@semaphore-protocol/group": "^3.10.1",
     "@semaphore-protocol/identity": "^3.10.1",
     "@semaphore-protocol/proof": "^3.10.1",
@@ -25,12 +26,15 @@
     "wagmi": "^1.0.6"
   },
   "devDependencies": {
+    "@nomicfoundation/hardhat-foundry": "^1.1.1",
+    "@nomiclabs/hardhat-ethers": "^2.2.3",
     "@types/node": "^17.0.31",
     "@types/react": "^18.0.9",
     "@types/react-dom": "^18.0.3",
     "autoprefixer": "^10.4.15",
     "eslint": "^8.15.0",
     "eslint-config-next": "^12.1.6",
+    "hardhat": "^2.17.2",
     "postcss": "^8.4.28",
     "tailwindcss": "^3.3.3",
     "typescript": "^5.0.4"

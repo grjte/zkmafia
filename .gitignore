@@ -45,6 +45,8 @@ yarn-error.log*
 \*.tsbuildinfo
 next-env.d.ts
 
-# forge
+# forge and hardhat
 out
 cache
+artifacts
+cache_hardhat

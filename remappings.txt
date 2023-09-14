@@ -1,0 +1,4 @@
+semaphore/=contracts/lib/semaphore/packages/contracts/contracts
+@semaphore/=contracts/lib/semaphore/packages/contracts/contracts
+@zk-kit/incremental-merkle-tree.sol/=contracts/lib/zk-kit/packages/incremental-merkle-tree.sol/contracts
+@openzeppelin/=contracts/lib/openzeppelin-contracts

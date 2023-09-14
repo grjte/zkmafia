@@ -76,17 +76,23 @@ Make sure you have Foundry installed & set up.
 
 ## Start dev server
 
-Run the command:
+Deploying with hardhat seems much easier — more documentation and a more mature project
 
+Make sure to first run the command:
 ```
-npm run dev:foundry
+npx hardhat node
+```
+
+and then you may run
+```
+npm run dev
 ```
 
 This will:
 
 - Start a Next.js dev server,
-- Start the `@wagmi/cli` in [**watch mode**](https://wagmi.sh/cli/commands/generate#options) to listen to changes in our contracts, and instantly generate code,
-- Start an Anvil instance (Mainnet Fork) on an RPC URL.
+- Run wagmi, which will generate code
+- Deploy smart contracts to a local instance
 
 ## Deploy our contract to Anvil
 
